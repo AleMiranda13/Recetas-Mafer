@@ -15,6 +15,31 @@ const dedupByTitle = arr => {
   });
 };
 
+/* ===== Navegación por pestañas (tabs) ===== */
+const sections = document.querySelectorAll("main section");
+const tabs = document.querySelectorAll("nav .tab");
+
+function showTab(id) {
+  sections.forEach(s => s.classList.toggle("active", s.id === id));
+  tabs.forEach(t => t.setAttribute("aria-selected", t.dataset.tab === id ? "true" : "false"));
+}
+
+// Conectar botones del header
+tabs.forEach(t => t.addEventListener("click", () => showTab(t.dataset.tab)));
+
+// Al cargar, aseguramos que quede visible la sección marcada como active en el HTML
+const firstSelected = document.querySelector('nav .tab[aria-selected="true"]');
+if (firstSelected) showTab(firstSelected.dataset.tab);
+
+/* ===== Buscar del inicio → ir a "Buscar" y ejecutar ===== */
+document.querySelector("#btn-home-search")?.addEventListener("click", () => {
+  const q = document.querySelector("#q-home").value;
+  document.querySelector("#q").value = q;
+  showTab("explorar");             
+  doSearch(q);                      
+});
+
+
 /* ========= LocalStorage ========= */
 const LS_KEY = "recetas_v1";
 const loadRecetas = () => { try { return JSON.parse(localStorage.getItem(LS_KEY)) || [] } catch { return [] } };

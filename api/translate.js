@@ -1,43 +1,57 @@
-// api/translate.js — Proxy a DeepL API (EN/auto → ES)
+// /api/translate.js — DeepL API proxy con control de errores y batching
+
 export default async function handler(req, res) {
+  if (req.method !== "POST") {
+    return res.status(405).json({ error: "Método no permitido" });
+  }
+
   try {
-    const { texts, text, target = "ES" } = await readBody(req);
-    const items = Array.isArray(texts) ? texts : text ? [text] : [];
-    if (!items.length)
-      return res.status(400).json({ error: "Falta 'texts' o 'text'" });
-
+    const { texts, text, target = "es" } = await readBody(req);
     const key = process.env.DEEPL_API_KEY;
-    if (!key)
-      return res
-        .status(500)
-        .json({ error: "Falta DEEPL_API_KEY en las variables de entorno" });
 
-    const results = [];
-    for (const q of items) {
-      const r = await fetch("https://api-free.deepl.com/v2/translate", {
-        method: "POST",
-        headers: { "Content-Type": "application/x-www-form-urlencoded" },
-        body: new URLSearchParams({
-          auth_key: key,
-          text: q,
-          target_lang: target.toUpperCase(),
-        }),
-      });
-      const j = await r.json();
-      if (r.ok && j.translations && j.translations[0]?.text) {
-        results.push(j.translations[0].text);
-      } else {
-        results.push(q);
-      }
+    if (!key) {
+      return res.status(500).json({ error: "Falta DEEPL_API_KEY en variables de entorno" });
     }
 
+    const toTranslate = Array.isArray(texts)
+      ? texts.filter(Boolean)
+      : text ? [text] : [];
+
+    if (!toTranslate.length) {
+      return res.status(400).json({ error: "Falta 'texts' (array) o 'text' (string)" });
+    }
+
+    // DeepL permite varios textos con el mismo parámetro 'text'
+    const params = new URLSearchParams();
+    for (const t of toTranslate) params.append("text", t);
+    params.append("target_lang", target.toUpperCase());
+
+    const resp = await fetch("https://api-free.deepl.com/v2/translate", {
+      method: "POST",
+      headers: {
+        "Authorization": `DeepL-Auth-Key ${key}`,
+        "Content-Type": "application/x-www-form-urlencoded"
+      },
+      body: params.toString()
+    });
+
+    const json = await resp.json().catch(() => ({}));
+
+    if (!resp.ok || !json.translations) {
+      console.error("DeepL error:", json);
+      return res.status(resp.status).json({
+        error: "Error al traducir con DeepL",
+        detail: json
+      });
+    }
+
+    const translated = json.translations.map(t => t.text);
     res.setHeader("Access-Control-Allow-Origin", "*");
-    return res.status(200).json({ translations: results });
+    return res.status(200).json({ translations: translated });
+
   } catch (e) {
-    console.error("Error en /api/translate:", e);
-    return res
-      .status(500)
-      .json({ error: "Error al traducir", detail: String(e) });
+    console.error("Handler error:", e);
+    return res.status(500).json({ error: "Fallo interno al traducir", detail: String(e) });
   }
 }
 

@@ -19,6 +19,14 @@ const dedupByTitle = arr => {
 };
 const clone = obj => JSON.parse(JSON.stringify(obj));
 
+// ---- Cache global de recetas por ID (de cualquier sección)
+const recipeCache = new Map();
+function cacheRecipes(arr = []) {
+  arr.forEach(r => {
+    if (r?.id) recipeCache.set(r.id, r);
+  });
+}
+
 /* ======= Traducción EN→ES (con caché) ======= */
 let TRANSLATE_ON = localStorage.getItem("translate_on") !== "0"; // ON por defecto
 const shouldTranslate = () => TRANSLATE_ON;
@@ -175,6 +183,12 @@ const gridTipicas = $("#grid-tipicas");
 function renderTipicas() {
   if (!gridTipicas) return;
   gridTipicas.innerHTML = tipicas.map(r => recipeCard(r)).join("");
+}
+renderTipicas();
+function renderTipicas() {
+  if (!gridTipicas) return;
+  gridTipicas.innerHTML = tipicas.map(r => recipeCard(r)).join("");
+  cacheRecipes(tipicas);                 // <-- NUEVO
 }
 renderTipicas();
 
@@ -368,6 +382,7 @@ async function doSearch(qRaw) {
     let merged = dedupByTitle(json.recipes || []);
     if (shouldTranslate() && merged.length) {
       merged = await Promise.all(merged.map(translateRecipe));
+      cacheRecipes(merged);
     }
 
     // Traducción automática al español
@@ -399,6 +414,7 @@ $("#btn-generar")?.addEventListener("click", async () => {
     let merged = dedupByTitle(json.recipes || []);
     if (shouldTranslate() && merged.length) {
        merged = await Promise.all(merged.map(translateRecipe));
+       cacheRecipes(merged);
     }
 
     if (shouldTranslate && merged.length) {
@@ -505,17 +521,22 @@ document.addEventListener("click", (e) => {
   if (!btn) return;
   const card = e.target.closest(".recipe");
   const id = card?.dataset.id;
+  if (!id) return;
 
-  // Buscar en resultados (API) o en típicas o en Mis recetas
-  let r = tempResults.find(x => x.id === id) ||
+  // Buscar primero en el cache global
+  let r = recipeCache.get(id) ||
           tipicas.find(x => x.id === id) ||
+          tempResults.find(x => x.id === id) ||
           loadRecetas().find(x => x.id === id);
+
   if (!r) return;
 
+  // ---- Ver receta
   if (btn.dataset.action === "ver") {
     openDetalle(r);
   }
 
+  // ---- Importar receta
   if (btn.dataset.action === "importar") {
     const save = { ...r, id: Date.now().toString(), createdAt: new Date().toISOString(), fav: false };
     upsertReceta(save);
@@ -523,20 +544,28 @@ document.addEventListener("click", (e) => {
     alert("Guardada en Mis recetas ✅");
   }
 
+  // ---- Favorito ⭐
   if (btn.dataset.action === "fav") {
     const data = loadRecetas();
     const rec = data.find(x => x.id === id);
     if (!rec) { alert("Primero importá o guardá la receta para marcarla ⭐"); return; }
-    rec.fav = !rec.fav; saveRecetas(data);
-    renderMisRecetas(); renderFavoritas();
+    rec.fav = !rec.fav;
+    saveRecetas(data);
+    renderMisRecetas();
+    renderFavoritas();
   }
 
+  // ---- Eliminar receta
   if (btn.dataset.action === "eliminar") {
     const data = loadRecetas();
-    if (!data.find(x => x.id === id)) { alert("Solo podés eliminar recetas guardadas."); return; }
+    if (!data.find(x => x.id === id)) {
+      alert("Solo podés eliminar recetas guardadas.");
+      return;
+    }
     if (!confirm("¿Eliminar esta receta?")) return;
     saveRecetas(data.filter(x => x.id !== id));
-    renderMisRecetas(); renderFavoritas();
+    renderMisRecetas();
+    renderFavoritas();
   }
 });
 

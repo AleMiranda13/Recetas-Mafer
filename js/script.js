@@ -1,10 +1,5 @@
-/* =========================================================
-   Recetas de Mafer — script.js (Vercel + Edamam + CRUD)
-   - Búsqueda por nombre e ingredientes (via /api/edamam)
-   - Recetas típicas en inicio
-   - Mis recetas / Favoritas (localStorage)
-   - Modal con Ver / Importar / ⭐ / Eliminar / Editar
-   ========================================================= */
+let misFilter = "";
+let favFilter = "";
 
 /* ========= Helpers básicos ========= */
 const $ = s => document.querySelector(s);
@@ -23,6 +18,60 @@ const dedupByTitle = arr => {
   });
 };
 const clone = obj => JSON.parse(JSON.stringify(obj));
+
+/* ======= Traducción EN→ES (con caché) ======= */
+const shouldTranslate = (navigator.language || "").toLowerCase().startsWith("es");
+const _tCache = new Map();
+
+async function translateMany(texts) {
+  const out = [];
+  const need = [];
+  const idx = [];
+
+  texts.forEach((t, i) => {
+    const key = `es|${t}`;
+    if (_tCache.has(key)) {
+      out[i] = _tCache.get(key);
+    } else {
+      need.push(t);
+      idx.push(i);
+    }
+  });
+
+  if (need.length) {
+    try {
+      const r = await fetch("/api/translate", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ texts: need, target: "es" })
+      });
+      const j = await r.json();
+      const trans = j.translations || need;
+      trans.forEach((tr, k) => {
+        const i = idx[k];
+        out[i] = tr;
+        _tCache.set(`es|${need[k]}`, tr);
+      });
+    } catch {
+      idx.forEach((i, k) => out[i] = need[k]); // fallback: original
+    }
+  }
+  return out.map((v, i) => v ?? texts[i]);
+}
+
+async function translateRecipe(r) {
+  // Lo mínimo: título + ingredientes + pasos
+  const title = r.titulo || "";
+  const ings = r.ingredientes || [];
+  const pasos = r.pasos || [];
+  const pack = [title, ...ings, ...pasos];
+  const tr = await translateMany(pack);
+  const tTitle = tr[0];
+  const tIngs  = tr.slice(1, 1 + ings.length);
+  const tPasos = tr.slice(1 + ings.length);
+
+  return { ...r, titulo: tTitle, ingredientes: tIngs, pasos: tPasos };
+}
 
 /* ========= Navegación por pestañas (tabs) ========= */
 const sections = $$("main section");
@@ -312,7 +361,13 @@ async function doSearch(qRaw) {
   try {
     const res = await fetch(`/api/edamam?q=${encodeURIComponent(q)}&limit=24`);
     const json = await res.json();
-    const merged = dedupByTitle(json.recipes || []);
+    let merged = dedupByTitle(json.recipes || []);
+
+    // Traducción automática al español
+    if (shouldTranslate && merged.length) {
+      merged = await Promise.all(merged.map(translateRecipe));
+    }
+
     tempResults = merged;
     gridResultados.innerHTML = merged.length
       ? merged.map(r => recipeCard(r)).join("")
@@ -334,7 +389,12 @@ $("#btn-generar")?.addEventListener("click", async () => {
     const q = list.join(", ");
     const res = await fetch(`/api/edamam?q=${encodeURIComponent(q)}&limit=15`);
     const json = await res.json();
-    const merged = dedupByTitle(json.recipes || []);
+    let merged = dedupByTitle(json.recipes || []);
+
+    if (shouldTranslate && merged.length) {
+      merged = await Promise.all(merged.map(translateRecipe));
+    }
+
     tempResults = merged;
     salida.innerHTML = merged.length
       ? merged.map(r => recipeCard(r)).join("")
@@ -351,17 +411,52 @@ const gridFavs = $("#grid-favs");
 const emptyMis = $("#empty-mis");
 const emptyFavs = $("#empty-favs");
 
+function ensureSearchBar(container, id, placeholder, onInput) {
+  const parent = container?.parentElement;
+  if (!parent) return;
+  let sb = parent.querySelector(`#${id}`);
+  if (!sb) {
+    sb = document.createElement("input");
+    sb.id = id;
+    sb.className = "input";
+    sb.placeholder = placeholder;
+    sb.style.marginBottom = "12px";
+    parent.insertBefore(sb, container);
+    sb.addEventListener("input", e => onInput(e.target.value.trim().toLowerCase()));
+  }
+  return sb;
+}
+
 function renderMisRecetas() {
   if (!gridMis) return;
-  const data = loadRecetas().sort((a,b)=> new Date(b.createdAt) - new Date(a.createdAt));
+  ensureSearchBar(gridMis, "mis-search", "Buscar en mis recetas…", (v) => {
+    misFilter = v; renderMisRecetas();
+  });
+
+  const base = loadRecetas().sort((a,b)=> new Date(b.createdAt) - new Date(a.createdAt));
+  const data = misFilter
+    ? base.filter(r => (r.titulo||"").toLowerCase().includes(misFilter) ||
+                       (r.ingredientes||[]).join(",").toLowerCase().includes(misFilter))
+    : base;
+
   gridMis.innerHTML = data.map(r => recipeCard(r, { actions: ["ver","fav","eliminar"] })).join("");
   if (emptyMis) emptyMis.style.display = data.length ? "none" : "block";
 }
+
 function renderFavoritas() {
   if (!gridFavs) return;
-  const favs = loadRecetas().filter(r => r.fav);
-  gridFavs.innerHTML = favs.map(r => recipeCard(r, { actions: ["ver","fav","eliminar"] })).join("");
-  if (emptyFavs) emptyFavs.style.display = favs.length ? "none" : "block";
+  ensureSearchBar(gridFavs, "favs-search", "Buscar en favoritas…", (v) => {
+    favFilter = v; renderFavoritas();
+  });
+
+  const base = loadRecetas().filter(r => r.fav);
+  const data = favFilter
+    ? base.filter(r => (r.titulo||"").toLowerCase().includes(favFilter) ||
+                       (r.ingredientes||[]).join(",").toLowerCase().includes(favFilter))
+    : base;
+
+  gridFavs.innerHTML = data.map(r => recipeCard(r, { actions: ["ver","fav","eliminar"] })).join("");
+  if (emptyFavs) emptyFavs.style.display = data.length ? "none" : "block";
 }
 
 /* ========= Form Nueva Receta ========= */

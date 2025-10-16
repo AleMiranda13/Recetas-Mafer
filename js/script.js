@@ -20,7 +20,8 @@ const dedupByTitle = arr => {
 const clone = obj => JSON.parse(JSON.stringify(obj));
 
 /* ======= Traducción EN→ES (con caché) ======= */
-const shouldTranslate = (navigator.language || "").toLowerCase().startsWith("es");
+let TRANSLATE_ON = localStorage.getItem("translate_on") !== "0"; // ON por defecto
+const shouldTranslate = () => TRANSLATE_ON;
 const _tCache = new Map();
 
 async function translateMany(texts) {
@@ -235,25 +236,28 @@ async function openDetalle(r) {
   modalRecetaId = r.id;
   editMode = false;
 
-  // Si viene de API y falta info, completamos con el detalle
-  const full = await fetchRecipeDetailIfNeeded({ ...r });
+  // Completar detalle si falta info
+  let full = await fetchRecipeDetailIfNeeded({ ...r });
+
+  // 🔥 Traducir título/ingredientes/pasos para el modal
+  if (shouldTranslate()) {
+    full = await translateRecipe(full);
+  }
+
   editDraft = clone(full);
 
-  // Render básico
   mdTitulo.textContent = full.titulo + (full.fav ? " ⭐" : "");
   mdCat.textContent = full.categoria || "—";
   mdFecha.textContent = full.createdAt ? "Guardada el " + formatDate(full.createdAt) : "";
 
-  // Ingredientes
   mdIng.innerHTML = (full.ingredientes?.length ? full.ingredientes : ["—"])
     .map(i => `<li>${escapeHtml(i)}</li>`).join("");
 
-  // Pasos (si no hay, dejamos un link a la fuente si existe)
   if (full.pasos && full.pasos.length) {
     mdPasos.innerHTML = full.pasos.map(p => `<li>${escapeHtml(p)}</li>`).join("");
   } else {
     mdPasos.innerHTML = full.sourceUrl
-      ? `<li>Esta receta no trae pasos en la API. Podés ver el paso a paso acá: 
+      ? `<li>Esta receta no trae pasos en la API. Mirá el paso a paso acá:
            <a href="${full.sourceUrl}" target="_blank" rel="noopener">Receta original</a></li>`
       : `<li class="muted">Esta receta no trae pasos en la API.</li>`;
   }
@@ -362,6 +366,9 @@ async function doSearch(qRaw) {
     const res = await fetch(`/api/edamam?q=${encodeURIComponent(q)}&limit=24`);
     const json = await res.json();
     let merged = dedupByTitle(json.recipes || []);
+    if (shouldTranslate() && merged.length) {
+      merged = await Promise.all(merged.map(translateRecipe));
+    }
 
     // Traducción automática al español
     if (shouldTranslate && merged.length) {
@@ -390,6 +397,9 @@ $("#btn-generar")?.addEventListener("click", async () => {
     const res = await fetch(`/api/edamam?q=${encodeURIComponent(q)}&limit=15`);
     const json = await res.json();
     let merged = dedupByTitle(json.recipes || []);
+    if (shouldTranslate() && merged.length) {
+       merged = await Promise.all(merged.map(translateRecipe));
+    }
 
     if (shouldTranslate && merged.length) {
       merged = await Promise.all(merged.map(translateRecipe));

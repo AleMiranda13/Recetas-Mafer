@@ -1,65 +1,43 @@
-// api/translate.js — Proxy robusto a LibreTranslate con fallback + api_key opcional
+// api/translate.js — Proxy a DeepL API (EN/auto → ES)
 export default async function handler(req, res) {
   try {
-    const body = req.method === "POST" ? await readBody(req) : {};
-    const { texts, text, target = "es" } = body;
+    const { texts, text, target = "ES" } = await readBody(req);
+    const items = Array.isArray(texts) ? texts : text ? [text] : [];
+    if (!items.length)
+      return res.status(400).json({ error: "Falta 'texts' o 'text'" });
 
-    const items = Array.isArray(texts) ? texts : (text ? [text] : []);
-    if (!items.length) {
-      return res.status(400).json({ error: "Falta 'texts' (array) o 'text' (string)" });
-    }
-
-    // 1) Endpoints en orden de preferencia (se prueban como fallback)
-    const fromEnv = process.env.LIBRETRANSLATE_URL && process.env.LIBRETRANSLATE_URL.trim();
-    const endpoints = [
-      fromEnv,
-      "https://libretranslate.de/translate",
-      "https://translate.argosopentech.com/translate",
-      "https://libretranslate.com/translate"
-    ].filter(Boolean);
-
-    const apiKey = process.env.LIBRETRANSLATE_KEY || undefined;
+    const key = process.env.DEEPL_API_KEY;
+    if (!key)
+      return res
+        .status(500)
+        .json({ error: "Falta DEEPL_API_KEY en las variables de entorno" });
 
     const results = [];
     for (const q of items) {
-      let translated = null;
-
-      for (const url of endpoints) {
-        try {
-          const r = await fetch(url, {
-            method: "POST",
-            headers: {
-              "Content-Type": "application/json",
-              "accept": "application/json"
-            },
-            body: JSON.stringify({
-              q,
-              source: "auto",
-              target,
-              format: "text",
-              ...(apiKey ? { api_key: apiKey } : {})
-            })
-          });
-
-          const j = await safeJson(r);
-          // Distintas instancias devuelven {translatedText} o {error}
-          if (r.ok && j && typeof j.translatedText === "string" && j.translatedText.length) {
-            translated = j.translatedText;
-            break; // éxito con este endpoint
-          }
-          // Si vino error explícito, probamos siguiente endpoint
-        } catch (_) {
-          // Ignoramos y probamos siguiente endpoint
-        }
+      const r = await fetch("https://api-free.deepl.com/v2/translate", {
+        method: "POST",
+        headers: { "Content-Type": "application/x-www-form-urlencoded" },
+        body: new URLSearchParams({
+          auth_key: key,
+          text: q,
+          target_lang: target.toUpperCase(),
+        }),
+      });
+      const j = await r.json();
+      if (r.ok && j.translations && j.translations[0]?.text) {
+        results.push(j.translations[0].text);
+      } else {
+        results.push(q);
       }
-
-      results.push(translated ?? q); // si no hubo suerte, devolvemos original
     }
 
     res.setHeader("Access-Control-Allow-Origin", "*");
     return res.status(200).json({ translations: results });
   } catch (e) {
-    return res.status(500).json({ error: "Fallo al traducir", detail: String(e) });
+    console.error("Error en /api/translate:", e);
+    return res
+      .status(500)
+      .json({ error: "Error al traducir", detail: String(e) });
   }
 }
 
@@ -67,9 +45,9 @@ async function readBody(req) {
   const chunks = [];
   for await (const c of req) chunks.push(c);
   const buf = Buffer.concat(chunks).toString("utf8");
-  try { return JSON.parse(buf || "{}"); } catch { return {}; }
-}
-
-async function safeJson(r) {
-  try { return await r.json(); } catch { return null; }
+  try {
+    return JSON.parse(buf || "{}");
+  } catch {
+    return {};
+  }
 }

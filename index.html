@@ -1,0 +1,160 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Recetas de Mafer</title>
+  <meta name="description" content="Recetario dulce & fitness de Mafer. Guarda tus recetas favoritas, buscá por ingredientes o descubrí nuevas ideas.">
+  <link rel="stylesheet" href="css/style.css" />
+</head>
+<body>
+  <header>
+    <div class="wrap">
+      <div class="brand">
+        <div class="logo">🍓</div>
+        <h1>Recetas de Mafer <span class="tagline">dulce & fitness</span></h1>
+      </div>
+      <nav aria-label="Secciones">
+        <button class="tab" data-tab="home" aria-selected="true">Inicio</button>
+        <button class="tab" data-tab="explorar">Buscar</button>
+        <button class="tab" data-tab="generador">Por ingredientes</button>
+        <button class="tab" data-tab="nueva">Agregar receta</button>
+        <button class="tab" data-tab="mis-recetas">Mis recetas</button>
+        <button class="tab" data-tab="favoritas">Favoritas</button>
+        <button class="tab" data-tab="fitness">Fitness</button>
+      </nav>
+    </div>
+  </header>
+
+  <main>
+
+    <!-- 🏠 INICIO -->
+    <section id="home" class="active">
+      <div class="card">
+        <h2>Bienvenida, Mafer ✨</h2>
+        <p>Descubrí postres clásicos, recetas rápidas y opciones saludables. Guardá tus favoritas o creá nuevas con lo que tengas en casa.</p>
+        <div class="chips">
+          <span class="chip">Dulces</span>
+          <span class="chip">Sin azúcar</span>
+          <span class="chip">Proteico</span>
+          <span class="chip">30 min o menos</span>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="searchbar">
+          <input class="input" id="q-home" placeholder="Buscar recetas..." />
+          <button class="btn primary" id="btn-home-search">Buscar</button>
+        </div>
+      </div>
+
+      <div class="card">
+        <h2>Recetas típicas</h2>
+        <div class="recipes" id="grid-tipicas"></div>
+      </div>
+    </section>
+
+    <!-- 🔍 BUSCAR -->
+    <section id="explorar">
+      <div class="card">
+        <div class="searchbar">
+          <input class="input" id="q" placeholder="Ej: brownie, pollo, proteico…" />
+          <select id="filtro-cat">
+            <option value="">Todas</option>
+            <option value="dulce">Dulce</option>
+            <option value="salado">Salado</option>
+            <option value="fitness">Fitness</option>
+          </select>
+          <button class="btn" id="btn-buscar">Buscar</button>
+        </div>
+      </div>
+      <div class="card">
+        <h3>Resultados</h3>
+        <div class="recipes" id="grid-resultados"></div>
+      </div>
+    </section>
+
+    <!-- 🍯 GENERADOR POR INGREDIENTES -->
+    <section id="generador">
+      <div class="card">
+        <h2>Decime qué tenés y te digo qué hacer 🍯</h2>
+        <textarea id="ingredientes" class="input" rows="3" placeholder="banana, avena, cacao..."></textarea>
+        <div class="actions">
+          <button class="btn primary" id="btn-generar">Generar receta</button>
+        </div>
+      </div>
+      <div class="card">
+        <h3>Resultado</h3>
+        <div id="gen-salida" class="muted">Ingresá ingredientes y tocá “Generar”.</div>
+      </div>
+    </section>
+
+    <!-- ✍️ NUEVA RECETA -->
+    <section id="nueva">
+      <div class="card">
+        <h2>Agregar nueva receta ✍️</h2>
+        <form id="form-nueva" class="stack">
+          <input type="text" id="titulo" class="input" placeholder="Nombre de la receta" required />
+          <input type="text" id="categoria" class="input" placeholder="Categoría (dulce, salado, fitness…)" />
+          <input type="text" id="ing" class="input" placeholder="Ingredientes (separados por coma)" />
+          <textarea id="pasos" class="input" rows="4" placeholder="Pasos a seguir..."></textarea>
+          <div class="actions">
+            <button class="btn" type="reset">Limpiar</button>
+            <button class="btn primary" type="submit">Guardar</button>
+          </div>
+        </form>
+      </div>
+    </section>
+
+    <!-- 📖 MIS RECETAS -->
+    <section id="mis-recetas">
+      <div class="card">
+        <h2>Mis recetas</h2>
+        <div id="empty-mis" class="muted">Todavía no guardaste recetas. Creá una en “Agregar receta” ✍️</div>
+        <div class="recipes" id="grid-mis"></div>
+      </div>
+    </section>
+
+    <!-- ⭐ FAVORITAS -->
+    <section id="favoritas">
+      <div class="card">
+        <h2>Favoritas ⭐</h2>
+        <div id="empty-favs" class="muted">Aún no marcaste favoritas. Tocá ⭐ en una receta.</div>
+        <div class="recipes" id="grid-favs"></div>
+      </div>
+    </section>
+
+    <!-- 💪 FITNESS -->
+    <section id="fitness">
+      <div class="card">
+        <h2>Fitness 💪</h2>
+        <p class="muted">Encontrá snacks proteicos, opciones pre y post entreno, y recetas ligeras.</p>
+      </div>
+    </section>
+  </main>
+
+  <!-- 🧁 MODAL DETALLE DE RECETA -->
+  <dialog id="modal-detalle">
+    <div class="modal-head">
+      <h3 id="md-titulo">Receta</h3>
+      <button class="btn ghost" id="md-cerrar">Cerrar</button>
+    </div>
+    <div class="modal-body">
+      <div class="meta-line">
+        <span class="badge" id="md-cat"></span>
+        <span class="muted" id="md-fecha"></span>
+      </div>
+      <h4>Ingredientes</h4>
+      <ul id="md-ingredientes"></ul>
+      <h4>Pasos</h4>
+      <ol id="md-pasos"></ol>
+      <div class="actions end">
+        <button class="btn" id="md-eliminar">Eliminar</button>
+        <button class="btn" id="md-fav">⭐ Favorita</button>
+      </div>
+    </div>
+  </dialog>
+
+  <script src="js/script.js"></script>
+</body>
+</html>

@@ -182,12 +182,53 @@ function renderModalFields(r) {
   mdEditar.textContent = editMode ? "Guardar" : "Editar";
 }
 
-function openDetalle(r) {
+async function openDetalle(r) {
   modalRecetaId = r.id;
   editMode = false;
-  editDraft = clone(r);
-  renderModalFields(r);
+
+  // Si viene de API y falta info, completamos con el detalle
+  const full = await fetchRecipeDetailIfNeeded({ ...r });
+  editDraft = clone(full);
+
+  // Render básico
+  mdTitulo.textContent = full.titulo + (full.fav ? " ⭐" : "");
+  mdCat.textContent = full.categoria || "—";
+  mdFecha.textContent = full.createdAt ? "Guardada el " + formatDate(full.createdAt) : "";
+
+  // Ingredientes
+  mdIng.innerHTML = (full.ingredientes?.length ? full.ingredientes : ["—"])
+    .map(i => `<li>${escapeHtml(i)}</li>`).join("");
+
+  // Pasos (si no hay, dejamos un link a la fuente si existe)
+  if (full.pasos && full.pasos.length) {
+    mdPasos.innerHTML = full.pasos.map(p => `<li>${escapeHtml(p)}</li>`).join("");
+  } else {
+    mdPasos.innerHTML = full.sourceUrl
+      ? `<li>Esta receta no trae pasos en la API. Podés ver el paso a paso acá: 
+           <a href="${full.sourceUrl}" target="_blank" rel="noopener">Receta original</a></li>`
+      : `<li class="muted">Esta receta no trae pasos en la API.</li>`;
+  }
+
   modal.showModal();
+}
+
+async function fetchRecipeDetailIfNeeded(r) {
+  // Si ya tenemos ingredientes y pasos, no hace falta
+  const faltaIng = !r.ingredientes || r.ingredientes.length === 0;
+  const faltaPasos = !r.pasos || r.pasos.length === 0;
+  if ((!faltaIng && !faltaPasos) || !r.edamamId) return r;
+
+  try {
+    const res = await fetch(`/api/edamam?id=${encodeURIComponent(r.edamamId)}`);
+    const json = await res.json();
+    if (json.recipe) {
+      // Completamos vacíos con lo que venga del detalle
+      r.ingredientes = r.ingredientes && r.ingredientes.length ? r.ingredientes : (json.recipe.ingredientes || []);
+      r.pasos = r.pasos && r.pasos.length ? r.pasos : (json.recipe.pasos || []);
+      r.sourceUrl = r.sourceUrl || json.recipe.sourceUrl || null;
+    }
+  } catch {}
+  return r;
 }
 
 mdCerrar?.addEventListener("click", () => {

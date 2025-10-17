@@ -25,43 +25,62 @@ const recipeCache = new Map();
 function cacheRecipes(arr = []) { arr.forEach(r => { if (r?.id) recipeCache.set(r.id, r); }); }
 
 /* ========= Traducción EN→ES ========= */
-// ON por defecto; podés cambiar con localStorage.setItem("translate_on","0/1")
 let TRANSLATE_ON = localStorage.getItem("translate_on") !== "0";
 const shouldTranslate = () => TRANSLATE_ON;
 
-const _tCache = new Map();
+// caché en cliente
+const _tCache = new Map(); // key: `es|texto` -> traducción
+const CLIENT_TIMEOUT_MS = 1500;
+
 async function translateMany(texts) {
-  const out = [];
+  if (!shouldTranslate() || !texts?.length) return texts;
+
+  const out = new Array(texts.length);
   const need = [];
   const idx  = [];
-  texts.forEach((t, i) => {
+
+  texts.forEach((t,i) => {
     const key = `es|${t}`;
     if (_tCache.has(key)) out[i] = _tCache.get(key);
     else { need.push(t); idx.push(i); }
   });
-  if (need.length) {
-    try {
-      const r = await fetch("/api/translate", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ texts: need, target: "es" })
-      });
-      const j = await r.json();
-      const trans = j.translations || need;
-      trans.forEach((tr, k) => {
-        const i = idx[k];
-        out[i] = tr;
-        _tCache.set(`es|${need[k]}`, tr);
-      });
-    } catch {
-      idx.forEach((i, k) => out[i] = need[k]); // fallback: original
-    }
+
+  if (!need.length) return out;
+
+  // POST con timeout; si falla, devolvemos originales sin romper UX
+  try {
+    const controller = new AbortController();
+    const id = setTimeout(() => controller.abort(), CLIENT_TIMEOUT_MS);
+
+    const r = await fetch("/api/translate", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ texts: need, target: "es" }),
+      signal: controller.signal
+    });
+    clearTimeout(id);
+
+    const j = await r.json().catch(() => ({}));
+    const trans = j?.translations || need;
+    trans.forEach((tr,k) => {
+      const i = idx[k];
+      out[i] = tr ?? need[k];
+      _tCache.set(`es|${need[k]}`, out[i]);
+    });
+
+  } catch {
+    // falló la traducción -> devolvemos originales
+    idx.forEach((i,k) => out[i] = need[k]);
   }
-  return out.map((v, i) => v ?? texts[i]);
+
+  // fusiono cacheados+traducidos
+  texts.forEach((t,i) => { if (out[i] == null) out[i] = t; });
+  return out;
 }
 
 // Traducir receta completa (título + ingredientes + pasos) — usar en modal
 async function translateRecipe(r) {
+  // traduce título, ingredientes y pasos (non-blocking en openDetalle)
   const title = r.titulo || "";
   const ings  = r.ingredientes || [];
   const pasos = r.pasos || [];
@@ -70,8 +89,8 @@ async function translateRecipe(r) {
   return {
     ...r,
     titulo: tr[0],
-    ingredientes: tr.slice(1, 1 + ings.length),
-    pasos: tr.slice(1 + ings.length)
+    ingredientes: tr.slice(1, 1+ings.length),
+    pasos: tr.slice(1+ings.length)
   };
 }
 
@@ -213,21 +232,41 @@ function renderModalFields(r) {
   mdFecha.textContent  = r.createdAt ? "Guardada el " + formatDate(r.createdAt) : "";
 
   if (!editMode) {
-    mdIng.innerHTML  = (r.ingredientes?.length ? r.ingredientes : ["—"]).map(i => `<li>${escapeHtml(i)}</li>`).join("");
-    mdPasos.innerHTML= (r.pasos?.length ? r.pasos : ["—"]).map(p => `<li>${escapeHtml(p)}</li>`).join("");
+    // --- Ingredientes
+    mdIng.innerHTML = (r.ingredientes?.length ? r.ingredientes : ["—"])
+      .map(i => `<li>${escapeHtml(i)}</li>`).join("");
+
+    // --- Pasos (si hay)
+    if (r.pasos && r.pasos.length) {
+      mdPasos.innerHTML = r.pasos.map(p => `<li>${escapeHtml(p)}</li>`).join("");
+    } else {
+      // --- Mensaje especial cuando no vienen pasos de la API
+      mdPasos.innerHTML = r.sourceUrl
+        ? `<li class="muted">Esta receta no trae pasos en la API.<br>
+            Mirá el paso a paso acá: 
+            <a href="${r.sourceUrl}" target="_blank" rel="noopener">Receta original</a></li>`
+        : `<li class="muted">Esta receta no trae pasos en la API.</li>`;
+    }
+
   } else {
+    // --- Modo edición
     mdIng.innerHTML = `
       <label class="muted">Título</label>
       <input id="ed-titulo" class="input" value="${escapeHtml(r.titulo)}">
+
       <label class="muted">Categoría</label>
-      <input id="ed-cat" class="input" value="${escapeHtml(r.categoria||"")}">
+      <input id="ed-cat" class="input" value="${escapeHtml(r.categoria || "")}">
+
       <label class="muted">Ingredientes (1 por línea)</label>
-      <textarea id="ed-ings" class="input" rows="6">${escapeHtml((r.ingredientes||[]).join("\n"))}</textarea>
+      <textarea id="ed-ings" class="input" rows="6">${escapeHtml((r.ingredientes || []).join("\n"))}</textarea>
+
       <label class="muted">Pasos (1 por línea)</label>
-      <textarea id="ed-pasos" class="input" rows="8">${escapeHtml((r.pasos||[]).join("\n"))}</textarea>
+      <textarea id="ed-pasos" class="input" rows="8">${escapeHtml((r.pasos || []).join("\n"))}</textarea>
     `;
-    mdPasos.innerHTML = "";
+    mdPasos.innerHTML = ""; // vacío, ya están los campos arriba
   }
+
+  // --- Actualiza el texto del botón Editar
   mdEditar.textContent = editMode ? "Guardar" : "Editar";
 }
 
@@ -251,28 +290,30 @@ async function fetchRecipeDetailIfNeeded(r) {
 async function openDetalle(r) {
   modalRecetaId = r.id;
   editMode = false;
-
-  // Completar detalle y traducir FULL para el modal
-  let full = await fetchRecipeDetailIfNeeded({ ...r });
-  if (shouldTranslate()) full = await translateRecipe(full);
-
-  editDraft = clone(full);
-
-  mdTitulo.textContent = full.titulo + (full.fav ? " ⭐" : "");
-  mdCat.textContent    = full.categoria || "—";
-  mdFecha.textContent  = full.createdAt ? "Guardada el " + formatDate(full.createdAt) : "";
-  mdIng.innerHTML      = (full.ingredientes?.length ? full.ingredientes : ["—"]).map(i => `<li>${escapeHtml(i)}</li>`).join("");
-
-  if (full.pasos && full.pasos.length) {
-    mdPasos.innerHTML = full.pasos.map(p => `<li>${escapeHtml(p)}</li>`).join("");
-  } else {
-    mdPasos.innerHTML = full.sourceUrl
-      ? `<li>Esta receta no trae pasos en la API. Mirá el paso a paso acá:
-           <a href="${full.sourceUrl}" target="_blank" rel="noopener">Receta original</a></li>`
-      : `<li class="muted">Esta receta no trae pasos en la API.</li>`;
-  }
-
+  mdTitulo.textContent = r.titulo || "Receta";
+  mdCat.textContent    = r.categoria || "—";
+  mdFecha.textContent  = r.createdAt ? "Guardada el " + formatDate(r.createdAt) : "";
+  mdIng.innerHTML      = (r.ingredientes?.length
+                          ? r.ingredientes.map(i => `<li>${escapeHtml(i)}</li>`).join("")
+                          : `<li class="muted">Buscando ingredientes…</li>`);
+  mdPasos.innerHTML    = (r.pasos?.length
+                          ? r.pasos.map(p => `<li>${escapeHtml(p)}</li>`).join("")
+                          : `<li class="muted">Preparando pasos…</li>`);
   modal.showModal();
+
+  let full = await fetchRecipeDetailIfNeeded({ ...r });
+  
+  renderModalFields(full);
+
+  if (shouldTranslate()) {
+    try {
+      const traducida = await translateRecipe(full);
+      if (modalRecetaId === r.id) {
+        renderModalFields(traducida);
+      }
+    } catch (_) {
+    }
+  }
 }
 
 mdCerrar?.addEventListener("click", () => { editMode = false; modal.close(); });
@@ -375,7 +416,10 @@ async function doSearch(qRaw) {
     const json = await res.json();
 
     let merged = dedupByTitle(json.recipes || []);
-    merged = await translateTitles(merged);   // títulos rápidos
+    if (shouldTranslate() && merged.length) {
+      const titles = await translateMany(merged.map(x => x.titulo || ""));
+      merged = merged.map((r,i) => ({ ...r, titulo: titles[i] || r.titulo }));
+    }
     cacheRecipes(merged);
     tempResults = merged;
     setQueryCache(cacheKey, merged);
@@ -419,9 +463,13 @@ $("#btn-generar")?.addEventListener("click", async () => {
     const json = await res.json();
 
     let merged = dedupByTitle(json.recipes || []);
-    merged = await translateTitles(merged);   // títulos rápidos
+    if (shouldTranslate() && merged.length) {
+      const titles = await translateMany(merged.map(x => x.titulo || ""));
+      merged = merged.map((r,i) => ({ ...r, titulo: titles[i] || r.titulo }));
+    }
     cacheRecipes(merged);
     tempResults = merged;
+
     setQueryCache(cacheKey, merged);
 
     salida.innerHTML = merged.length

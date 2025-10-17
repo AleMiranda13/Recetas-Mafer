@@ -1,8 +1,9 @@
+/* ========= Estados de filtros ========= */
 let misFilter = "";
 let favFilter = "";
 
 /* ========= Helpers básicos ========= */
-const $ = s => document.querySelector(s);
+const $  = s => document.querySelector(s);
 const $$ = s => document.querySelectorAll(s);
 const escapeHtml = s => String(s).replace(/[&<>"']/g, m => ({
   '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'
@@ -19,34 +20,25 @@ const dedupByTitle = arr => {
 };
 const clone = obj => JSON.parse(JSON.stringify(obj));
 
-// ---- Cache global de recetas por ID (de cualquier sección)
+/* ========= Cache global por ID (para que Ver/Importar funcione aunque cambies de pestaña) ========= */
 const recipeCache = new Map();
-function cacheRecipes(arr = []) {
-  arr.forEach(r => {
-    if (r?.id) recipeCache.set(r.id, r);
-  });
-}
+function cacheRecipes(arr = []) { arr.forEach(r => { if (r?.id) recipeCache.set(r.id, r); }); }
 
-/* ======= Traducción EN→ES (con caché) ======= */
-let TRANSLATE_ON = localStorage.getItem("translate_on") !== "0"; // ON por defecto
+/* ========= Traducción EN→ES ========= */
+// ON por defecto; podés cambiar con localStorage.setItem("translate_on","0/1")
+let TRANSLATE_ON = localStorage.getItem("translate_on") !== "0";
 const shouldTranslate = () => TRANSLATE_ON;
-const _tCache = new Map();
 
+const _tCache = new Map();
 async function translateMany(texts) {
   const out = [];
   const need = [];
-  const idx = [];
-
+  const idx  = [];
   texts.forEach((t, i) => {
     const key = `es|${t}`;
-    if (_tCache.has(key)) {
-      out[i] = _tCache.get(key);
-    } else {
-      need.push(t);
-      idx.push(i);
-    }
+    if (_tCache.has(key)) out[i] = _tCache.get(key);
+    else { need.push(t); idx.push(i); }
   });
-
   if (need.length) {
     try {
       const r = await fetch("/api/translate", {
@@ -68,28 +60,34 @@ async function translateMany(texts) {
   return out.map((v, i) => v ?? texts[i]);
 }
 
+// Traducir receta completa (título + ingredientes + pasos) — usar en modal
 async function translateRecipe(r) {
-  // Lo mínimo: título + ingredientes + pasos
   const title = r.titulo || "";
-  const ings = r.ingredientes || [];
+  const ings  = r.ingredientes || [];
   const pasos = r.pasos || [];
-  const pack = [title, ...ings, ...pasos];
-  const tr = await translateMany(pack);
-  const tTitle = tr[0];
-  const tIngs  = tr.slice(1, 1 + ings.length);
-  const tPasos = tr.slice(1 + ings.length);
-
-  return { ...r, titulo: tTitle, ingredientes: tIngs, pasos: tPasos };
+  const pack  = [title, ...ings, ...pasos];
+  const tr    = await translateMany(pack);
+  return {
+    ...r,
+    titulo: tr[0],
+    ingredientes: tr.slice(1, 1 + ings.length),
+    pasos: tr.slice(1 + ings.length)
+  };
 }
 
-/* ========= Navegación por pestañas (tabs) ========= */
+// Traducir SOLO títulos (para el listado — rápido)
+async function translateTitles(recipes) {
+  const titles = recipes.map(r => r.titulo || "");
+  const tt = shouldTranslate() && titles.length ? await translateMany(titles) : titles;
+  return recipes.map((r, i) => ({ ...r, titulo: tt[i] }));
+}
+
+/* ========= Navegación por pestañas ========= */
 const sections = $$("main section");
 const tabs = $$("nav .tab");
-
 function showTab(id) {
   sections.forEach(s => s.classList.toggle("active", s.id === id));
   tabs.forEach(t => t.setAttribute("aria-selected", t.dataset.tab === id ? "true" : "false"));
-  // Render on-demand
   if (id === "mis-recetas") renderMisRecetas();
   if (id === "favoritas")  renderFavoritas();
 }
@@ -99,22 +97,16 @@ if (firstSelected) showTab(firstSelected.dataset.tab);
 
 /* ========= LocalStorage ========= */
 const LS_KEY = "recetas_v1";
-const loadRecetas = () => { try { return JSON.parse(localStorage.getItem(LS_KEY)) || [] } catch { return [] } };
-const saveRecetas = arr => localStorage.setItem(LS_KEY, JSON.stringify(arr));
-const upsertReceta = r => { const a = loadRecetas(); const i = a.findIndex(x => x.id === r.id); i >= 0 ? a[i] = r : a.push(r); saveRecetas(a); };
-const isSaved = id => loadRecetas().some(r => r.id === id);
+const loadRecetas   = () => { try { return JSON.parse(localStorage.getItem(LS_KEY)) || [] } catch { return [] } };
+const saveRecetas   = arr => localStorage.setItem(LS_KEY, JSON.stringify(arr));
+const upsertReceta  = r => { const a = loadRecetas(); const i = a.findIndex(x => x.id === r.id); i >= 0 ? a[i] = r : a.push(r); saveRecetas(a); };
+const isSaved       = id => loadRecetas().some(r => r.id === id);
 
 /* ========= Render de tarjetas ========= */
 function recipeCard(r, opts = {}) {
   const actions = opts.actions || (r.createdAt ? ["ver", "fav", "eliminar"] : ["ver", "importar"]);
-  const labels = {
-    ver: "Ver",
-    importar: "Importar",
-    fav: r.fav ? "Quitar ⭐" : "Marcar ⭐",
-    eliminar: "Eliminar"
-  };
-  const btns = actions.map(a => `<button class="btn" data-action="${a}">${labels[a]}</button>`).join("");
-
+  const labels  = { ver: "Ver", importar: "Importar", fav: r.fav ? "Quitar ⭐" : "Marcar ⭐", eliminar: "Eliminar" };
+  const btns    = actions.map(a => `<button class="btn" data-action="${a}">${labels[a]}</button>`).join("");
   return `
     <article class="recipe" data-id="${r.id}">
       <h3>${escapeHtml(r.titulo)} ${r.fav ? "⭐" : ""}</h3>
@@ -183,27 +175,22 @@ const gridTipicas = $("#grid-tipicas");
 function renderTipicas() {
   if (!gridTipicas) return;
   gridTipicas.innerHTML = tipicas.map(r => recipeCard(r)).join("");
-}
-renderTipicas();
-function renderTipicas() {
-  if (!gridTipicas) return;
-  gridTipicas.innerHTML = tipicas.map(r => recipeCard(r)).join("");
-  cacheRecipes(tipicas);                 // <-- NUEVO
+  cacheRecipes(tipicas);
 }
 renderTipicas();
 
 /* ========= Modal detalle + edición ========= */
-const modal = $("#modal-detalle");
-const mdTitulo = $("#md-titulo");
-const mdCat = $("#md-cat");
-const mdFecha = $("#md-fecha");
-const mdIng = $("#md-ingredientes");
-const mdPasos = $("#md-pasos");
-const mdCerrar = $("#md-cerrar");
-const mdEliminar = $("#md-eliminar");
-const mdFav = $("#md-fav");
+const modal     = $("#modal-detalle");
+const mdTitulo  = $("#md-titulo");
+const mdCat     = $("#md-cat");
+const mdFecha   = $("#md-fecha");
+const mdIng     = $("#md-ingredientes");
+const mdPasos   = $("#md-pasos");
+const mdCerrar  = $("#md-cerrar");
+const mdEliminar= $("#md-eliminar");
+const mdFav     = $("#md-fav");
 
-// botón Editar (lo agregamos si no existe)
+// Botón Editar dinámico
 let mdEditar = $("#md-editar");
 if (!mdEditar) {
   const actions = modal?.querySelector(".actions.end");
@@ -212,7 +199,7 @@ if (!mdEditar) {
     mdEditar.className = "btn";
     mdEditar.id = "md-editar";
     mdEditar.textContent = "Editar";
-    actions.insertBefore(mdEditar, actions.firstChild); // antes de Eliminar/⭐
+    actions.insertBefore(mdEditar, actions.firstChild);
   }
 }
 
@@ -222,14 +209,13 @@ let editDraft = null;
 
 function renderModalFields(r) {
   mdTitulo.textContent = r.titulo + (r.fav ? " ⭐" : "");
-  mdCat.textContent = r.categoria || "—";
-  mdFecha.textContent = r.createdAt ? "Guardada el " + formatDate(r.createdAt) : "";
+  mdCat.textContent    = r.categoria || "—";
+  mdFecha.textContent  = r.createdAt ? "Guardada el " + formatDate(r.createdAt) : "";
 
   if (!editMode) {
-    mdIng.innerHTML = (r.ingredientes?.length ? r.ingredientes : ["—"]).map(i => `<li>${escapeHtml(i)}</li>`).join("");
-    mdPasos.innerHTML = (r.pasos?.length ? r.pasos : ["—"]).map(p => `<li>${escapeHtml(p)}</li>`).join("");
+    mdIng.innerHTML  = (r.ingredientes?.length ? r.ingredientes : ["—"]).map(i => `<li>${escapeHtml(i)}</li>`).join("");
+    mdPasos.innerHTML= (r.pasos?.length ? r.pasos : ["—"]).map(p => `<li>${escapeHtml(p)}</li>`).join("");
   } else {
-    // Modo edición: mostramos inputs
     mdIng.innerHTML = `
       <label class="muted">Título</label>
       <input id="ed-titulo" class="input" value="${escapeHtml(r.titulo)}">
@@ -240,32 +226,42 @@ function renderModalFields(r) {
       <label class="muted">Pasos (1 por línea)</label>
       <textarea id="ed-pasos" class="input" rows="8">${escapeHtml((r.pasos||[]).join("\n"))}</textarea>
     `;
-    mdPasos.innerHTML = ""; // lo dejamos vacío en edición (ya tenemos textarea arriba)
+    mdPasos.innerHTML = "";
   }
-  // Botones según estado
   mdEditar.textContent = editMode ? "Guardar" : "Editar";
+}
+
+async function fetchRecipeDetailIfNeeded(r) {
+  const faltaIng = !r.ingredientes || r.ingredientes.length === 0;
+  const faltaPasos = !r.pasos || r.pasos.length === 0;
+  if ((!faltaIng && !faltaPasos) || !r.edamamId) return r;
+
+  try {
+    const res = await fetch(`/api/edamam?id=${encodeURIComponent(r.edamamId)}`);
+    const json = await res.json();
+    if (json.recipe) {
+      r.ingredientes = r.ingredientes?.length ? r.ingredientes : (json.recipe.ingredientes || []);
+      r.pasos        = r.pasos?.length ? r.pasos : (json.recipe.pasos || []);
+      r.sourceUrl    = r.sourceUrl || json.recipe.sourceUrl || null;
+    }
+  } catch {}
+  return r;
 }
 
 async function openDetalle(r) {
   modalRecetaId = r.id;
   editMode = false;
 
-  // Completar detalle si falta info
+  // Completar detalle y traducir FULL para el modal
   let full = await fetchRecipeDetailIfNeeded({ ...r });
-
-  // 🔥 Traducir título/ingredientes/pasos para el modal
-  if (shouldTranslate()) {
-    full = await translateRecipe(full);
-  }
+  if (shouldTranslate()) full = await translateRecipe(full);
 
   editDraft = clone(full);
 
   mdTitulo.textContent = full.titulo + (full.fav ? " ⭐" : "");
-  mdCat.textContent = full.categoria || "—";
-  mdFecha.textContent = full.createdAt ? "Guardada el " + formatDate(full.createdAt) : "";
-
-  mdIng.innerHTML = (full.ingredientes?.length ? full.ingredientes : ["—"])
-    .map(i => `<li>${escapeHtml(i)}</li>`).join("");
+  mdCat.textContent    = full.categoria || "—";
+  mdFecha.textContent  = full.createdAt ? "Guardada el " + formatDate(full.createdAt) : "";
+  mdIng.innerHTML      = (full.ingredientes?.length ? full.ingredientes : ["—"]).map(i => `<li>${escapeHtml(i)}</li>`).join("");
 
   if (full.pasos && full.pasos.length) {
     mdPasos.innerHTML = full.pasos.map(p => `<li>${escapeHtml(p)}</li>`).join("");
@@ -279,29 +275,7 @@ async function openDetalle(r) {
   modal.showModal();
 }
 
-async function fetchRecipeDetailIfNeeded(r) {
-  // Si ya tenemos ingredientes y pasos, no hace falta
-  const faltaIng = !r.ingredientes || r.ingredientes.length === 0;
-  const faltaPasos = !r.pasos || r.pasos.length === 0;
-  if ((!faltaIng && !faltaPasos) || !r.edamamId) return r;
-
-  try {
-    const res = await fetch(`/api/edamam?id=${encodeURIComponent(r.edamamId)}`);
-    const json = await res.json();
-    if (json.recipe) {
-      // Completamos vacíos con lo que venga del detalle
-      r.ingredientes = r.ingredientes && r.ingredientes.length ? r.ingredientes : (json.recipe.ingredientes || []);
-      r.pasos = r.pasos && r.pasos.length ? r.pasos : (json.recipe.pasos || []);
-      r.sourceUrl = r.sourceUrl || json.recipe.sourceUrl || null;
-    }
-  } catch {}
-  return r;
-}
-
-mdCerrar?.addEventListener("click", () => {
-  editMode = false;
-  modal.close();
-});
+mdCerrar?.addEventListener("click", () => { editMode = false; modal.close(); });
 
 mdEliminar?.addEventListener("click", () => {
   if (!modalRecetaId) return;
@@ -326,25 +300,18 @@ mdFav?.addEventListener("click", () => {
 
 mdEditar?.addEventListener("click", () => {
   if (!modalRecetaId) return;
-
-  // Solo recetas guardadas se pueden editar
   const data = loadRecetas();
   const r = data.find(x => x.id === modalRecetaId);
   if (!r) { alert("Para editar primero importá o guardá la receta."); return; }
 
   if (!editMode) {
-    // Entrar a modo edición
     editMode = true;
     renderModalFields(r);
   } else {
-    // Guardar cambios
     const titulo = ($("#ed-titulo")?.value || "").trim();
     const categoria = ($("#ed-cat")?.value || "").trim().toLowerCase();
-    const ings = ($("#ed-ings")?.value || "")
-      .split(/\r?\n/).map(x => x.trim()).filter(Boolean);
-    const pasos = ($("#ed-pasos")?.value || "")
-      .split(/\r?\n/).map(x => x.trim()).filter(Boolean);
-
+    const ings = ($("#ed-ings")?.value || "").split(/\r?\n/).map(x => x.trim()).filter(Boolean);
+    const pasos = ($("#ed-pasos")?.value || "").split(/\r?\n/).map(x => x.trim()).filter(Boolean);
     if (!titulo) { alert("Poné un título 🙂"); return; }
 
     r.titulo = titulo;
@@ -360,9 +327,24 @@ mdEditar?.addEventListener("click", () => {
   }
 });
 
-/* ========= Buscar recetas (Edamam vía Vercel API) ========= */
+/* ========= Buscar (con caché + cancelación) ========= */
 const gridResultados = $("#grid-resultados");
 let tempResults = [];
+
+// Cache por query con TTL
+const queryCache = new Map();
+const CACHE_TTL_MS = 5 * 60 * 1000; // 5 min
+function setQueryCache(key, value) { queryCache.set(key, { value, at: Date.now() }); }
+function getQueryCache(key) {
+  const item = queryCache.get(key);
+  if (!item) return null;
+  if (Date.now() - item.at > CACHE_TTL_MS) { queryCache.delete(key); return null; }
+  return item.value;
+}
+
+// AbortControllers para cancelar peticiones en curso
+let searchCtrl = null;
+let genCtrl    = null;
 
 $("#btn-buscar")?.addEventListener("click", () => doSearch($("#q").value));
 $("#btn-home-search")?.addEventListener("click", () => {
@@ -375,59 +357,82 @@ $("#btn-home-search")?.addEventListener("click", () => {
 async function doSearch(qRaw) {
   const q = (qRaw || "").trim();
   if (!q) { gridResultados.innerHTML = ""; return; }
+
+  if (searchCtrl) searchCtrl.abort();
+  searchCtrl = new AbortController();
+
+  const cacheKey = `search:${q.toLowerCase()}`;
+  const cached = getQueryCache(cacheKey);
+  if (cached) {
+    tempResults = cached;
+    gridResultados.innerHTML = cached.map(r => recipeCard(r)).join("");
+    return;
+  }
+
   gridResultados.innerHTML = `<p class="muted">Buscando recetas…</p>`;
   try {
-    const res = await fetch(`/api/edamam?q=${encodeURIComponent(q)}&limit=24`);
+    const res = await fetch(`/api/edamam?q=${encodeURIComponent(q)}&limit=24`, { signal: searchCtrl.signal });
     const json = await res.json();
+
     let merged = dedupByTitle(json.recipes || []);
-    if (shouldTranslate() && merged.length) {
-      merged = await Promise.all(merged.map(translateRecipe));
-      cacheRecipes(merged);
-    }
-
-    // Traducción automática al español
-    if (shouldTranslate && merged.length) {
-      merged = await Promise.all(merged.map(translateRecipe));
-    }
-
+    merged = await translateTitles(merged);   // títulos rápidos
+    cacheRecipes(merged);
     tempResults = merged;
+    setQueryCache(cacheKey, merged);
+
     gridResultados.innerHTML = merged.length
       ? merged.map(r => recipeCard(r)).join("")
       : `<p class="muted">Sin resultados con “${escapeHtml(q)}”.</p>`;
   } catch (e) {
+    if (e.name === "AbortError") return;
     console.error(e);
     gridResultados.innerHTML = `<p class="muted">Error al buscar recetas.</p>`;
+  } finally {
+    searchCtrl = null;
   }
 }
 
-/* ========= Buscar por ingredientes ========= */
+/* ========= Por ingredientes (con caché + cancelación) ========= */
 $("#btn-generar")?.addEventListener("click", async () => {
   const raw = $("#ingredientes").value || "";
   const salida = $("#gen-salida");
   const list = raw.split(",").map(s => s.trim()).filter(Boolean);
+
   if (!list.length) { salida.textContent = "Escribí algunos ingredientes 🍫🍌"; return; }
+
+  if (genCtrl) genCtrl.abort();
+  genCtrl = new AbortController();
+
+  const q = list.join(", ");
+  const cacheKey = `ing:${q.toLowerCase()}`;
+
+  const cached = getQueryCache(cacheKey);
+  if (cached) {
+    tempResults = cached;
+    salida.innerHTML = cached.map(r => recipeCard(r)).join("");
+    return;
+  }
+
   salida.innerHTML = "Buscando con tus ingredientes…";
   try {
-    const q = list.join(", ");
-    const res = await fetch(`/api/edamam?q=${encodeURIComponent(q)}&limit=15`);
+    const res = await fetch(`/api/edamam?q=${encodeURIComponent(q)}&limit=15`, { signal: genCtrl.signal });
     const json = await res.json();
+
     let merged = dedupByTitle(json.recipes || []);
-    if (shouldTranslate() && merged.length) {
-       merged = await Promise.all(merged.map(translateRecipe));
-       cacheRecipes(merged);
-    }
-
-    if (shouldTranslate && merged.length) {
-      merged = await Promise.all(merged.map(translateRecipe));
-    }
-
+    merged = await translateTitles(merged);   // títulos rápidos
+    cacheRecipes(merged);
     tempResults = merged;
+    setQueryCache(cacheKey, merged);
+
     salida.innerHTML = merged.length
       ? merged.map(r => recipeCard(r)).join("")
       : "No encontré coincidencias 😅";
   } catch (e) {
+    if (e.name === "AbortError") return;
     console.error(e);
     salida.innerHTML = "Error consultando la API 😞";
+  } finally {
+    genCtrl = null;
   }
 });
 
@@ -435,7 +440,7 @@ $("#btn-generar")?.addEventListener("click", async () => {
 const gridMis  = $("#grid-mis");
 const gridFavs = $("#grid-favs");
 const emptyMis = $("#empty-mis");
-const emptyFavs = $("#empty-favs");
+const emptyFavs= $("#empty-favs");
 
 function ensureSearchBar(container, id, placeholder, onInput) {
   const parent = container?.parentElement;
@@ -455,32 +460,24 @@ function ensureSearchBar(container, id, placeholder, onInput) {
 
 function renderMisRecetas() {
   if (!gridMis) return;
-  ensureSearchBar(gridMis, "mis-search", "Buscar en mis recetas…", (v) => {
-    misFilter = v; renderMisRecetas();
-  });
-
+  ensureSearchBar(gridMis, "mis-search", "Buscar en mis recetas…", (v) => { misFilter = v; renderMisRecetas(); });
   const base = loadRecetas().sort((a,b)=> new Date(b.createdAt) - new Date(a.createdAt));
   const data = misFilter
     ? base.filter(r => (r.titulo||"").toLowerCase().includes(misFilter) ||
                        (r.ingredientes||[]).join(",").toLowerCase().includes(misFilter))
     : base;
-
   gridMis.innerHTML = data.map(r => recipeCard(r, { actions: ["ver","fav","eliminar"] })).join("");
   if (emptyMis) emptyMis.style.display = data.length ? "none" : "block";
 }
 
 function renderFavoritas() {
   if (!gridFavs) return;
-  ensureSearchBar(gridFavs, "favs-search", "Buscar en favoritas…", (v) => {
-    favFilter = v; renderFavoritas();
-  });
-
+  ensureSearchBar(gridFavs, "favs-search", "Buscar en favoritas…", (v) => { favFilter = v; renderFavoritas(); });
   const base = loadRecetas().filter(r => r.fav);
   const data = favFilter
     ? base.filter(r => (r.titulo||"").toLowerCase().includes(favFilter) ||
                        (r.ingredientes||[]).join(",").toLowerCase().includes(favFilter))
     : base;
-
   gridFavs.innerHTML = data.map(r => recipeCard(r, { actions: ["ver","fav","eliminar"] })).join("");
   if (emptyFavs) emptyFavs.style.display = data.length ? "none" : "block";
 }
@@ -490,11 +487,10 @@ const formNueva = $("#form-nueva");
 if (formNueva) {
   formNueva.addEventListener("submit", (e) => {
     e.preventDefault();
-    const titulo = $("#titulo").value.trim();
+    const titulo    = $("#titulo").value.trim();
     const categoria = ($("#categoria").value || "").trim().toLowerCase() || "general";
-    const ing = ($("#ing").value || "").trim();
-    const pasos = ($("#pasos").value || "").trim();
-
+    const ing       = ($("#ing").value || "").trim();
+    const pasos     = ($("#pasos").value || "").trim();
     if (!titulo) { alert("Poné un título 🙂"); return; }
 
     const receta = {
@@ -506,7 +502,6 @@ if (formNueva) {
       fav: false,
       createdAt: new Date().toISOString()
     };
-
     upsertReceta(receta);
     formNueva.reset();
     showTab("mis-recetas");
@@ -517,26 +512,23 @@ if (formNueva) {
 
 /* ========= Eventos globales (Ver / Importar / ⭐ / Eliminar) ========= */
 document.addEventListener("click", (e) => {
-  const btn = e.target.closest(".recipe .btn");
+  const btn  = e.target.closest(".recipe .btn");
   if (!btn) return;
   const card = e.target.closest(".recipe");
-  const id = card?.dataset.id;
+  const id   = card?.dataset.id;
   if (!id) return;
 
-  // Buscar primero en el cache global
+  // Buscar primero en cache global; luego fallback
   let r = recipeCache.get(id) ||
           tipicas.find(x => x.id === id) ||
           tempResults.find(x => x.id === id) ||
           loadRecetas().find(x => x.id === id);
-
   if (!r) return;
 
-  // ---- Ver receta
   if (btn.dataset.action === "ver") {
     openDetalle(r);
   }
 
-  // ---- Importar receta
   if (btn.dataset.action === "importar") {
     const save = { ...r, id: Date.now().toString(), createdAt: new Date().toISOString(), fav: false };
     upsertReceta(save);
@@ -544,10 +536,9 @@ document.addEventListener("click", (e) => {
     alert("Guardada en Mis recetas ✅");
   }
 
-  // ---- Favorito ⭐
   if (btn.dataset.action === "fav") {
     const data = loadRecetas();
-    const rec = data.find(x => x.id === id);
+    const rec  = data.find(x => x.id === id);
     if (!rec) { alert("Primero importá o guardá la receta para marcarla ⭐"); return; }
     rec.fav = !rec.fav;
     saveRecetas(data);
@@ -555,13 +546,9 @@ document.addEventListener("click", (e) => {
     renderFavoritas();
   }
 
-  // ---- Eliminar receta
   if (btn.dataset.action === "eliminar") {
     const data = loadRecetas();
-    if (!data.find(x => x.id === id)) {
-      alert("Solo podés eliminar recetas guardadas.");
-      return;
-    }
+    if (!data.find(x => x.id === id)) { alert("Solo podés eliminar recetas guardadas."); return; }
     if (!confirm("¿Eliminar esta receta?")) return;
     saveRecetas(data.filter(x => x.id !== id));
     renderMisRecetas();
@@ -569,7 +556,7 @@ document.addEventListener("click", (e) => {
   }
 });
 
-/* ========= Buscar del inicio → ir a "Buscar" y ejecutar (extra) ========= */
+/* ========= Buscar del inicio → ir a "Buscar" y ejecutar ========= */
 $("#btn-home-search")?.addEventListener("click", () => {
   const q = $("#q-home").value;
   $("#q").value = q;

@@ -1,15 +1,18 @@
-// --- Caché simple en memoria (se borra al redeploy) ---
-const CACHE = new Map();            // key = `${target}|${text}`
-const CACHE_MAX = 2000;
+// /api/translate.js
+// DeepL (Free/Pro) con fallback a LibreTranslate, timeout y "fail-soft".
+// Si TODO falla, devuelve el mismo texto para no frenar la app.
 
-function cacheGet(key) { return CACHE.get(key); }
-function cacheSet(key, value) {
-  if (CACHE.size >= CACHE_MAX) {
-    // borro el primero (pseudo-LRU)
-    const first = CACHE.keys().next().value;
-    if (first) CACHE.delete(first);
+const SRV_CACHE = new Map();           // cache servidor
+const SRV_CACHE_MAX = 2000;
+const REQUEST_TIMEOUT_MS = 1500;
+
+function cacheGet(k) { return SRV_CACHE.get(k); }
+function cacheSet(k, v) {
+  if (SRV_CACHE.size >= SRV_CACHE_MAX) {
+    const first = SRV_CACHE.keys().next().value;
+    if (first) SRV_CACHE.delete(first);
   }
-  CACHE.set(key, value);
+  SRV_CACHE.set(k, v);
 }
 
 export default async function handler(req, res) {
@@ -20,93 +23,78 @@ export default async function handler(req, res) {
   try {
     const { texts, text, target = "es" } = await readBody(req);
     const items = Array.isArray(texts) ? texts : (text ? [text] : []);
-    if (!items.length) {
-      return res.status(400).json({ error: "Falta 'texts' (array) o 'text' (string)" });
-    }
+    if (!items.length) return res.status(200).json({ translations: [] });
 
-    // 1) Respondo con lo que ya esté en caché y junto lo que falta
+    // 1) cache servidor
     const out = new Array(items.length);
     const need = [];
-    const idx  = [];
+    const idxs = [];
     items.forEach((t, i) => {
-      const key = `${target}|${t}`;
-      const c = cacheGet(key);
-      if (c != null) out[i] = c;
-      else { need.push(t); idx.push(i); }
+      const k = `${target}|${t}`;
+      const c = cacheGet(k);
+      if (c != null) out[i] = c; else { need.push(t); idxs.push(i); }
     });
 
-    if (need.length) {
-      // 2) Intento DeepL primero
-      let provider = "deepl";
-      let translated = null;
-      try {
-        translated = await translateDeepL(need, target);
-      } catch (e) {
-        // Si DeepL falla por quota/host (403/456) u otro error, intento LibreTranslate
-        provider = "libre";
-        translated = await translateLibre(need, target);
-      }
-
-      // 3) Relleno 'out' + guardo en caché
-      translated.forEach((tr, k) => {
-        const i = idx[k];
-        out[i] = tr ?? need[k];
-        cacheSet(`${target}|${need[k]}`, out[i]);
-      });
-      res.setHeader("X-Translate-Provider", provider);
-    } else {
+    if (!need.length) {
       res.setHeader("X-Translate-Provider", "cache");
+      return res.status(200).json({ translations: out });
     }
 
+    // 2) intento DeepL -> si falla, Libre -> si falla, identidades
+    let translated = null;
+    let provider = "deepl";
+
+    try {
+      translated = await withTimeout(REQUEST_TIMEOUT_MS, translateDeepL(need, target));
+    } catch {
+      provider = "libre";
+      try {
+        translated = await withTimeout(REQUEST_TIMEOUT_MS, translateLibre(need, target));
+      } catch {
+        provider = "identity";
+        translated = need.slice();
+      }
+    }
+
+    translated.forEach((tr, k) => {
+      const i = idxs[k];
+      out[i] = tr ?? need[k];
+      cacheSet(`${target}|${need[k]}`, out[i]);
+    });
+
+    res.setHeader("X-Translate-Provider", provider);
     return res.status(200).json({ translations: out });
 
   } catch (e) {
-    return res.status(500).json({ error: "Fallo al traducir", detail: String(e) });
+    // fallback total
+    return res.status(200).json({ translations: (Array.isArray(texts) ? texts : [text]).filter(Boolean) });
   }
 }
 
-// -------- DeepL ----------
 async function translateDeepL(texts, target) {
-  const DEEPL_KEY  = process.env.DEEPL_API_KEY || "";
-  const DEEPL_HOST = (process.env.DEEPL_API_HOST || "api-free.deepl.com").trim();
+  const KEY  = process.env.DEEPL_API_KEY || "";
+  const HOST = (process.env.DEEPL_API_HOST || "api-free.deepl.com").trim();
+  if (!KEY) throw new Error("DEEPL_KEY missing");
 
-  if (!DEEPL_KEY) throw new Error("DEEPL_KEY faltante");
-
-  // DeepL acepta array
-  const url = `https://${DEEPL_HOST}/v2/translate`;
-  const body = {
-    text: texts,
-    target_lang: target.toUpperCase(), // "ES"
-    // source_lang: "EN", // opcional
-  };
-
-  const r = await fetch(url, {
+  const r = await fetch(`https://${HOST}/v2/translate`, {
     method: "POST",
     headers: {
-      "Authorization": `DeepL-Auth-Key ${DEEPL_KEY}`,
+      "Authorization": `DeepL-Auth-Key ${KEY}`,
       "Content-Type": "application/json",
     },
-    body: JSON.stringify(body),
+    body: JSON.stringify({ text: texts, target_lang: target.toUpperCase() })
   });
-
   const j = await r.json().catch(() => ({}));
-  if (!r.ok) {
-    // 403/456 => sin crédito o host equivocado
-    const err = new Error(`DeepL error ${r.status}`);
-    err.status = r.status;
-    err.detail = j;
-    throw err;
-  }
+  if (!r.ok) throw new Error(`DEEPL ${r.status}`);
   return (j.translations || []).map(t => t.text || "");
 }
 
-// -------- LibreTranslate (fallback) ----------
 async function translateLibre(texts, target) {
-  const LT = process.env.LIBRETRANSLATE_URL || "https://libretranslate.com/translate";
+  const url = process.env.LIBRETRANSLATE_URL || "https://libretranslate.com/translate";
   const out = [];
   for (const q of texts) {
     try {
-      const r = await fetch(LT, {
+      const r = await fetch(url, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ q, source: "auto", target, format: "text" }),
@@ -120,10 +108,15 @@ async function translateLibre(texts, target) {
   return out;
 }
 
-// -------- util --------
+function withTimeout(ms, p) {
+  return new Promise((resolve, reject) => {
+    const id = setTimeout(() => reject(new Error("timeout")), ms);
+    p.then(v => { clearTimeout(id); resolve(v); }, e => { clearTimeout(id); reject(e); });
+  });
+}
+
 async function readBody(req) {
   const chunks = [];
   for await (const c of req) chunks.push(c);
-  const buf = Buffer.concat(chunks).toString("utf8");
-  try { return JSON.parse(buf || "{}"); } catch { return {}; }
+  try { return JSON.parse(Buffer.concat(chunks).toString("utf8") || "{}"); } catch { return {}; }
 }

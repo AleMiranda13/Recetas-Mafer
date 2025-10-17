@@ -35,47 +35,31 @@ const CLIENT_TIMEOUT_MS = 1500;
 async function translateMany(texts) {
   if (!shouldTranslate() || !texts?.length) return texts;
 
-  const out = new Array(texts.length);
-  const need = [];
-  const idx  = [];
+  const out = [], need = [], idx = [];
+  texts.forEach((t,i)=>{ const key=`es|${t}`; if(_tCache.has(key)) out[i]=_tCache.get(key); else { need.push(t); idx.push(i); }});
+  if (!need.length) return out.map((v,i)=>v ?? texts[i]);
 
-  texts.forEach((t,i) => {
-    const key = `es|${t}`;
-    if (_tCache.has(key)) out[i] = _tCache.get(key);
-    else { need.push(t); idx.push(i); }
-  });
-
-  if (!need.length) return out;
-
-  // POST con timeout; si falla, devolvemos originales sin romper UX
   try {
     const controller = new AbortController();
-    const id = setTimeout(() => controller.abort(), CLIENT_TIMEOUT_MS);
+    const id = setTimeout(() => controller.abort(), CLIENT_TIMEOUT_MS || 1500);
 
     const r = await fetch("/api/translate", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ texts: need, target: "es" }),
+      // 👇 forzamos Libre mientras DeepL está sin cuota
+      body: JSON.stringify({ texts: need, target: "es", prefer: "libre" }),
       signal: controller.signal
     });
     clearTimeout(id);
 
-    const j = await r.json().catch(() => ({}));
+    const j = await r.json().catch(()=>({}));
     const trans = j?.translations || need;
-    trans.forEach((tr,k) => {
-      const i = idx[k];
-      out[i] = tr ?? need[k];
-      _tCache.set(`es|${need[k]}`, out[i]);
-    });
+    trans.forEach((tr,k)=>{ const i=idx[k]; out[i]=tr ?? need[k]; _tCache.set(`es|${need[k]}`, out[i]); });
 
   } catch {
-    // falló la traducción -> devolvemos originales
-    idx.forEach((i,k) => out[i] = need[k]);
+    idx.forEach((i,k)=> out[i] = need[k]); // fall-back: original
   }
-
-  // fusiono cacheados+traducidos
-  texts.forEach((t,i) => { if (out[i] == null) out[i] = t; });
-  return out;
+  return out.map((v,i)=> v ?? texts[i]);
 }
 
 // Traducir receta completa (título + ingredientes + pasos) — usar en modal

@@ -1,0 +1,266 @@
+/* ==========================================================
+   🍓 Recetas de Mafer - Estilos
+   Paleta Pastel + Accesibilidad + Responsive + Dark mode opc.
+   ========================================================== */
+
+/* ===== Paleta Pastel =====
+   Fondo claro crema     : #FFF8F0
+   Panel / cartas blancas: #FFFFFF
+   Rosa acento suave     : #FFC4D6
+   Rosa acento 2         : #FF9DB7
+   Texto principal       : #2B2B2B
+   Texto secundario      : #6B7280
+   Borde sutil           : #EDE9F3
+*/
+
+:root {
+  --bg: #FFF8F0;
+  --panel: #FFFFFF;
+  --text: #2B2B2B;
+  --muted: #6B7280;
+  --brand: #FFC4D6;
+  --brand-2: #FF9DB7;
+  --ring: #FFD9E4;
+  --border: #EDE9F3;
+  --radius: 16px;
+  --shadow: 0 8px 24px rgba(255, 157, 183, 0.12), 0 2px 8px rgba(25, 28, 33, 0.04);
+}
+
+* { box-sizing: border-box; }
+html, body { height: 100%; }
+body {
+  margin: 0;
+  background:
+    radial-gradient(900px 480px at 10% -10%, rgba(255, 196, 214, .25), transparent 50%),
+    radial-gradient(800px 520px at 110% 0%, rgba(255, 226, 238, .35), transparent 55%),
+    var(--bg);
+  color: var(--text);
+  font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Inter, Helvetica, Arial, sans-serif;
+  line-height: 1.55;
+}
+
+/* ---------- Header ---------- */
+header {
+  position: sticky; top: 0; z-index: 30;
+  background: rgba(255, 255, 255, 0.7);
+  backdrop-filter: blur(8px);
+  border-bottom: 1px solid var(--border);
+}
+.wrap { max-width: 1100px; margin: 0 auto; padding: 16px; display: grid; gap: 10px; }
+
+.brand { display: flex; align-items: center; gap: 10px; }
+.logo {
+  width: 40px; height: 40px; border-radius: 12px;
+  background: conic-gradient(from 210deg, var(--brand-2), var(--brand));
+  display: grid; place-items: center; color: #8a2c42; font-weight: 800;
+  box-shadow: 0 4px 12px rgba(255, 157, 183, .35);
+}
+h1 { margin: 0; font-size: 20px; }
+.tagline { font-size: 12px; color: var(--muted); }
+
+/* ---------- Tabs ---------- */
+nav { display: flex; flex-wrap: wrap; gap: 8px; }
+.tab {
+  background: #fff;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  padding: 8px 12px;
+  color: var(--text);
+  cursor: pointer;
+  transition: transform .05s ease, box-shadow .2s ease, background .2s;
+  box-shadow: 0 1px 0 rgba(0,0,0,.03);
+}
+.tab:hover { transform: translateY(-1px); }
+.tab[aria-selected="true"] {
+  background: linear-gradient(120deg, rgba(255, 196, 214, .45), rgba(255, 226, 238, .5));
+  border-color: transparent;
+  box-shadow: 0 6px 16px rgba(255, 157, 183, .28);
+}
+
+/* ---------- Main / Cards ---------- */
+main { max-width: 1100px; margin: 18px auto; padding: 0 16px; }
+.card {
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 16px;
+  margin-bottom: 16px;
+  box-shadow: var(--shadow);
+}
+
+/* ---------- Inputs / Buttons ---------- */
+.input, textarea, select {
+  width: 100%;
+  padding: 12px 14px;
+  border-radius: 12px;
+  border: 1px solid var(--border);
+  background: #fff;
+  color: var(--text);
+  transition: box-shadow .2s ease, border-color .2s ease;
+}
+.input::placeholder, textarea::placeholder { color: #9AA3B2; }
+.input:focus, textarea:focus, select:focus {
+  outline: none;
+  border-color: var(--ring);
+  box-shadow: 0 0 0 4px rgba(255, 196, 214, .25);
+}
+:focus-visible {
+  outline: 3px solid var(--ring);
+  outline-offset: 2px;
+  border-radius: 12px;
+}
+
+.btn {
+  background: #fff;
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 10px 14px;
+  cursor: pointer;
+  transition: transform .05s ease, box-shadow .2s ease, background .2s;
+}
+.btn:hover { transform: translateY(-1px); box-shadow: 0 6px 16px rgba(0,0,0,.06); }
+.btn.primary {
+  background: linear-gradient(135deg, var(--brand), var(--brand-2));
+  color: #612a39;
+  border: none;
+  box-shadow: 0 8px 20px rgba(255, 157, 183, .35);
+}
+.btn.primary:hover { box-shadow: 0 10px 24px rgba(255, 157, 183, .45); }
+.btn.small { padding: 6px 10px; font-size: 13px; }
+.btn[disabled] { opacity: .55; cursor: not-allowed; }
+.btn.ghost { background: transparent; }
+
+/* ---------- Chips / Badges ---------- */
+.chips { display: flex; gap: 8px; flex-wrap: wrap; }
+.chip, .badge {
+  display: inline-flex; align-items: center; gap: 6px;
+  border-radius: 999px; padding: 6px 10px;
+  background: #fff;
+  border: 1px solid var(--border);
+  font-size: 12px; color: var(--muted);
+  box-shadow: 0 2px 6px rgba(0,0,0,.04);
+}
+
+/* ---------- Secciones ---------- */
+section { display: none; }
+section.active { display: block; }
+.muted { color: var(--muted); }
+.muted.center { text-align: center; padding: 12px; }
+
+/* ---------- Grilla de recetas ---------- */
+.recipes {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
+  gap: 14px;
+}
+.recipe {
+  background: #fff;
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  padding: 12px;
+  display: grid; gap: 8px;
+  box-shadow: 0 8px 18px rgba(255, 157, 183, .10);
+}
+.recipe .thumb { aspect-ratio: 4/3; overflow: hidden; border-radius: 10px; background: #fafafa; }
+.recipe .thumb img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.recipe .title { margin: 0; font-size: 16px; line-height: 1.3; }
+.recipe .meta { display: flex; gap: 8px; font-size: 12px; color: var(--muted); }
+.recipe .row { display: flex; gap: 8px; flex-wrap: wrap; }
+
+/* ---------- Modal ---------- */
+dialog {
+  border: none; border-radius: 18px;
+  background: #fff; color: var(--text); padding: 0;
+  max-width: 720px; width: 96%;
+  box-shadow: 0 24px 48px rgba(0,0,0,.18);
+}
+dialog::backdrop { background: rgba(0,0,0,.35); }
+.modal-head { display: flex; justify-content: space-between; align-items: center; padding: 14px 18px; border-bottom: 1px solid var(--border); }
+.modal-body { padding: 16px 18px; }
+.meta-line { display: flex; gap: 8px; align-items: center; margin-bottom: 12px; }
+
+/* ---------- Listas ---------- */
+ul, ol { padding-left: 1.2rem; }
+.modal-body ul li, .modal-body ol li { margin: 2px 0 6px; }
+
+/* ---------- Helpers ---------- */
+.actions { display: flex; gap: 8px; margin-top: 10px; }
+.actions.end { justify-content: flex-end; }
+.stack > * + * { margin-top: 10px; }
+.hidden { display: none !important; }
+.visually-hidden {
+  position: absolute !important; width: 1px; height: 1px; padding: 0; margin: -1px;
+  overflow: hidden; clip: rect(0,0,0,0); white-space: nowrap; border: 0;
+}
+
+/* ---------- Searchbar ---------- */
+.searchbar { display: grid; grid-template-columns: 1fr auto; gap: 8px; }
+@media (min-width: 700px){
+  .searchbar { grid-template-columns: 1fr 180px auto; }
+  .searchbar select { min-width: 160px; }
+}
+
+/* ---------- Skeleton (carga) ---------- */
+.skeleton {
+  background: linear-gradient(90deg, #f6f7f8 25%, #ecebeb 37%, #f6f7f8 63%);
+  background-size: 400% 100%;
+  animation: shimmer 1.2s infinite linear;
+  border-radius: 12px;
+  height: 160px;
+}
+@keyframes shimmer {
+  0% { background-position: 100% 0; }
+  100% { background-position: -100% 0; }
+}
+
+/* ---------- Toasts ---------- */
+.toast {
+  position: fixed;
+  bottom: 16px; left: 50%;
+  transform: translateX(-50%);
+  background: #fff;
+  border: 1px solid var(--border);
+  box-shadow: var(--shadow);
+  padding: 10px 14px;
+  border-radius: 12px;
+  z-index: 50;
+  animation: fadein .3s ease;
+}
+@keyframes fadein { from {opacity:0; transform:translate(-50%, 10px);} to {opacity:1; transform:translate(-50%,0);} }
+
+.toast-success { border-color: var(--brand); }
+.toast-error { border-color: #ff8fa3; }
+.toast-warn { border-color: #FFD580; }
+
+
+/* ---------- Modal Responsive ---------- */
+@media (max-width: 560px){
+  dialog { width: 100%; max-width: none; height: 92vh; border-radius: 14px; }
+  .modal-body { max-height: calc(92vh - 58px); overflow: auto; }
+}
+
+/* ---------- Dark Mode opcional ---------- */
+@media (prefers-color-scheme: dark){
+  :root{
+    --bg:#19171a; --panel:#1f1d21; --text:#f2f2f2; --muted:#b3b3b3;
+    --border:#2a2830; --ring:#5b3b46; --brand:#ffb3c7; --brand-2:#ff86a6;
+    --shadow: 0 8px 24px rgba(0,0,0,.35), 0 2px 8px rgba(0,0,0,.25);
+  }
+  header { background: rgba(31,29,33,.6); }
+  .tab, .chip, .badge, .btn, .input, textarea, select, .recipe, .card { background: var(--panel); }
+}
+
+/* ---------- Reduce motion ---------- */
+@media (prefers-reduced-motion: reduce){
+  * { animation: none !important; transition: none !important; }
+}
+
+/* ---------- Tipografía ---------- */
+h2 { margin: 0 0 8px; font-size: 22px; }
+h3 { margin: 0 0 8px; font-size: 18px; }
+h4 { margin: 12px 0 6px; font-size: 16px; }
+
+@media (max-width: 900px) {
+  nav { gap: 6px; }
+}

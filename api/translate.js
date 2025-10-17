@@ -4,40 +4,71 @@
 const SRV_CACHE = new Map();
 const SRV_CACHE_MAX = 2000;
 const REQUEST_TIMEOUT_MS = 1500;
+const CACHE_VERSION = "v3";                 // <- subí versión para invalidar entradas viejas
 
 function cacheGet(k){ return SRV_CACHE.get(k); }
 function cacheSet(k,v){ if(SRV_CACHE.size>=SRV_CACHE_MAX){ const f=SRV_CACHE.keys().next().value; if(f) SRV_CACHE.delete(f);} SRV_CACHE.set(k,v); }
 
+// helper para leer query string (en Node/Next middleware/route handler funciona)
+function getQuery(req){
+  try { return new URL(req.url, "http://localhost").searchParams; }
+  catch { return new URLSearchParams(); }
+}
+
 export default async function handler(req, res){
+  if(req.method==="OPTIONS"){              // CORS preflight simple
+    res.setHeader("Access-Control-Allow-Origin", "*");
+    res.setHeader("Access-Control-Allow-Headers", "Content-Type");
+    res.setHeader("Access-Control-Allow-Methods", "POST, OPTIONS");
+    return res.status(204).end();
+  }
   if(req.method!=="POST"){
-    res.setHeader("Allow","POST");
+    res.setHeader("Allow","POST, OPTIONS");
     return res.status(405).json({error:"Método no permitido"});
   }
   try{
-    const { texts, text, target="es", prefer } = await readBody(req);
-    const items = Array.isArray(texts) ? texts : (text ? [text] : []);
-    if(!items.length){ res.setHeader("X-Translate-Provider","empty"); return res.status(200).json({translations:[]}); }
+    const qs = getQuery(req);
+    const bypassCache = qs.get("bypassCache")==="1" || req.headers["x-bypass-cache"]==="1"; // <- NUEVO
+    const forceProvider = qs.get("provider"); // "deepl" | "libre" | "mymemory" | null
 
-    // cache
+    const { texts, text, target="es", prefer } = await readBody(req);
+    const trg = String(target || "es").toLowerCase();
+    const items = Array.isArray(texts) ? texts : (text ? [text] : []);
+    if(!items.length){
+      res.setHeader("Access-Control-Allow-Origin","*");
+      res.setHeader("X-Translate-Provider","empty");
+      return res.status(200).json({translations:[]});
+    }
+
+    // ---------- CACHE READ ----------
     const out = new Array(items.length), need=[], idx=[];
-    items.forEach((t,i)=>{ const k=`${target}|${t}`; const c=cacheGet(k); if(c!=null) out[i]=c; else{ need.push(t); idx.push(i); }});
-    if(!need.length){ res.setHeader("X-Translate-Provider","cache"); return res.status(200).json({ translations: out }); }
+    items.forEach((t,i)=>{
+      const k = `${CACHE_VERSION}:${trg}|${t}`;     // misma key que tenías pero versionada
+      const c = !bypassCache ? cacheGet(k) : null;  // <- respeta bypass
+      if(c!=null) out[i]=c; else { need.push(t); idx.push(i); }
+    });
+    if(!need.length){
+      res.setHeader("Access-Control-Allow-Origin","*");
+      res.setHeader("X-Translate-Provider","cache");
+      return res.status(200).json({ translations: out });
+    }
 
     // prefer: "libre" fuerza probar Libre primero (útil cuando DeepL está sin cuota)
-    const order = prefer==="libre" ? ["libre","deepl","mymemory"] : ["deepl","libre","mymemory"];
+    let order = prefer==="libre" ? ["libre","deepl","mymemory"] : ["deepl","libre","mymemory"];
+    if (forceProvider) order = [forceProvider, ...order.filter(p=>p!==forceProvider)]; // <- respeta ?provider=
 
     let translated = null, provider = "identity";
 
     for (const prov of order){
       try{
         if (prov==="deepl") {
-          translated = await withTimeout(REQUEST_TIMEOUT_MS, translateDeepL(need, target));
+          translated = await withTimeout(REQUEST_TIMEOUT_MS, translateDeepL(need, trg));
         } else if (prov==="libre") {
-          translated = await withTimeout(REQUEST_TIMEOUT_MS, translateLibre(need, target));
+          translated = await withTimeout(REQUEST_TIMEOUT_MS, translateLibre(need, trg));
         } else { // mymemory
-          translated = await withTimeout(REQUEST_TIMEOUT_MS, translateMyMemory(need, target));
+          translated = await withTimeout(REQUEST_TIMEOUT_MS, translateMyMemory(need, trg));
         }
-        // si algún proveedor devolvió exactamente igual para TODO, probá el siguiente
+        // si TODO vino exactamente igual, probá el siguiente
         const allSame = translated.every((tr,i)=> (tr||"").trim().toLowerCase()===(need[i]||"").trim().toLowerCase());
         if (allSame) throw new Error("same-output");
         provider = prov; break;
@@ -46,7 +77,15 @@ export default async function handler(req, res){
 
     if (!translated) { translated = need.slice(); provider="identity"; }
 
-    translated.forEach((tr,k)=>{ const i=idx[k]; out[i]=tr??need[k]; cacheSet(`${target}|${need[k]}`, out[i]); });
+    // ---------- WRITE + NO CACHE PARA IDENTITY ----------
+    translated.forEach((tr,k)=>{
+      const i = idx[k];
+      out[i] = tr ?? need[k];
+      // solo cacheamos si NO es identity (evita envenenar la caché con "milk"->"milk")
+      if (provider !== "identity") {
+        cacheSet(`${CACHE_VERSION}:${trg}|${need[k]}`, out[i]);
+      }
+    });
 
     res.setHeader("Access-Control-Allow-Origin","*");
     res.setHeader("X-Translate-Provider", provider);
@@ -55,11 +94,13 @@ export default async function handler(req, res){
   }catch(e){
     // emergencia: devolvé originales
     const raw = Array.isArray(texts) ? texts : (text ? [text] : []);
+    res.setHeader("Access-Control-Allow-Origin","*");
     res.setHeader("X-Translate-Provider","identity");
     return res.status(200).json({ translations: raw });
   }
 }
 
+// --- providers (sin cambios relevantes) ---
 async function translateDeepL(texts, target){
   const KEY  = (process.env.DEEPL_API_KEY || "").trim();
   const HOST = (process.env.DEEPL_API_HOST || "api-free.deepl.com").trim();
@@ -98,7 +139,7 @@ async function translateMyMemory(texts, target){
     try {
       const u = new URL("https://api.mymemory.translated.net/get");
       u.searchParams.set("q", q);
-      u.searchParams.set("langpair", `en|${target}`); 
+      u.searchParams.set("langpair", `en|${target}`);
       const r = await fetch(u.toString());
       const j = await r.json().catch(() => ({}));
       const tr = j?.responseData?.translatedText || q;

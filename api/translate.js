@@ -1,5 +1,4 @@
-// /api/translate.js — DeepL API proxy con control de errores y batching
-
+// /api/translate.js
 export default async function handler(req, res) {
   if (req.method !== "POST") {
     return res.status(405).json({ error: "Método no permitido" });
@@ -7,51 +6,67 @@ export default async function handler(req, res) {
 
   try {
     const { texts, text, target = "es" } = await readBody(req);
-    const key = process.env.DEEPL_API_KEY;
-
-    if (!key) {
-      return res.status(500).json({ error: "Falta DEEPL_API_KEY en variables de entorno" });
-    }
-
-    const toTranslate = Array.isArray(texts)
-      ? texts.filter(Boolean)
-      : text ? [text] : [];
-
-    if (!toTranslate.length) {
+    const items = Array.isArray(texts) ? texts : (text ? [text] : []);
+    if (!items.length) {
       return res.status(400).json({ error: "Falta 'texts' (array) o 'text' (string)" });
     }
 
-    // DeepL permite varios textos con el mismo parámetro 'text'
-    const params = new URLSearchParams();
-    for (const t of toTranslate) params.append("text", t);
-    params.append("target_lang", target.toUpperCase());
+    const DEEPL_KEY  = process.env.DEEPL_API_KEY || "";
+    const DEEPL_HOST = (process.env.DEEPL_API_HOST || "").trim(); // p.ej. "api-free.deepl.com"
+    const LT_URL     = process.env.LIBRETRANSLATE_URL || "https://libretranslate.com/translate";
 
-    const resp = await fetch("https://api-free.deepl.com/v2/translate", {
-      method: "POST",
-      headers: {
-        "Authorization": `DeepL-Auth-Key ${key}`,
-        "Content-Type": "application/x-www-form-urlencoded"
-      },
-      body: params.toString()
-    });
+    // Si hay key de DeepL, usamos DeepL. Si no, usamos LibreTranslate.
+    if (DEEPL_KEY) {
+      const host = DEEPL_HOST || "api-free.deepl.com"; // por defecto: FREE
+      const url = `https://${host}/v2/translate`;
 
-    const json = await resp.json().catch(() => ({}));
+      // DeepL acepta JSON con { text: [...], target_lang: 'ES', source_lang: 'EN' }
+      // target_lang debe ir en mayúsculas: ES
+      const body = {
+        text: items,
+        target_lang: (target || "es").toUpperCase(),
+        // source_lang: "EN",  // opcional; DeepL auto-detecta. Descomenta si querés forzar.
+      };
 
-    if (!resp.ok || !json.translations) {
-      console.error("DeepL error:", json);
-      return res.status(resp.status).json({
-        error: "Error al traducir con DeepL",
-        detail: json
+      const r = await fetch(url, {
+        method: "POST",
+        headers: {
+          "Authorization": `DeepL-Auth-Key ${DEEPL_KEY}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify(body),
       });
+
+      const j = await r.json().catch(() => ({}));
+
+      if (!r.ok) {
+        // Errores típicos:
+        // 403 -> auth/host inválido, 456 -> quota exceeded
+        return res.status(r.status).json({
+          error: "Error al traducir con DeepL",
+          detail: j,
+        });
+      }
+
+      const translations = (j.translations || []).map(t => t.text || "");
+      return res.status(200).json({ translations });
     }
 
-    const translated = json.translations.map(t => t.text);
-    res.setHeader("Access-Control-Allow-Origin", "*");
-    return res.status(200).json({ translations: translated });
+    // ---- Fallback a LibreTranslate (sin key)
+    const out = [];
+    for (const q of items) {
+      const rr = await fetch(LT_URL, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ q, source: "auto", target, format: "text" }),
+      });
+      const jj = await rr.json().catch(() => ({}));
+      out.push(jj.translatedText || q);
+    }
+    return res.status(200).json({ translations: out });
 
   } catch (e) {
-    console.error("Handler error:", e);
-    return res.status(500).json({ error: "Fallo interno al traducir", detail: String(e) });
+    return res.status(500).json({ error: "Fallo al traducir", detail: String(e) });
   }
 }
 
@@ -59,9 +74,5 @@ async function readBody(req) {
   const chunks = [];
   for await (const c of req) chunks.push(c);
   const buf = Buffer.concat(chunks).toString("utf8");
-  try {
-    return JSON.parse(buf || "{}");
-  } catch {
-    return {};
-  }
+  try { return JSON.parse(buf || "{}"); } catch { return {}; }
 }

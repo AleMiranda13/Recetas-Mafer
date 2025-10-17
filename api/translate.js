@@ -92,18 +92,20 @@ async function translateLibre(texts, target){
 }
 
 async function translateMyMemory(texts, target){
-  // target ej. "es". Usamos "auto|es"
+  // MyMemory ya no acepta "auto", forzamos origen "en"
   const out = [];
-  for(const q of texts){
-    try{
+  for (const q of texts) {
+    try {
       const u = new URL("https://api.mymemory.translated.net/get");
       u.searchParams.set("q", q);
-      u.searchParams.set("langpair", `auto|${target}`);
+      u.searchParams.set("langpair", `en|${target}`); 
       const r = await fetch(u.toString());
-      const j = await r.json().catch(()=>({}));
+      const j = await r.json().catch(() => ({}));
       const tr = j?.responseData?.translatedText || q;
       out.push(tr);
-    }catch{ out.push(q); }
+    } catch {
+      out.push(q);
+    }
   }
   return out;
 }
